@@ -1,9 +1,11 @@
 from tornado import gen, ioloop
 from tornado.httpserver import HTTPServer
+from tornado.locks import Event
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, bind_unused_port, gen_test
 from tornado.web import Application
 import asyncio
 import contextlib
+import gc
 import os
 import platform
 import traceback
@@ -40,7 +42,7 @@ class AsyncTestCaseTest(AsyncTestCase):
 
         # Timeout set with environment variable
         self.io_loop.add_timeout(time() + 1, self.stop)
-        with set_environ('ASYNC_TEST_TIMEOUT', '0.01'):
+        with set_environ("ASYNC_TEST_TIMEOUT", "0.01"):
             with self.assertRaises(self.failureException):
                 self.wait()
 
@@ -53,6 +55,30 @@ class AsyncTestCaseTest(AsyncTestCase):
         self.wait(timeout=0.02)
         self.io_loop.add_timeout(self.io_loop.time() + 0.03, self.stop)
         self.wait(timeout=0.15)
+
+
+class LeakTest(AsyncTestCase):
+    def tearDown(self):
+        super().tearDown()
+        # Trigger a gc to make warnings more deterministic.
+        gc.collect()
+
+    def test_leaked_coroutine(self):
+        # This test verifies that "leaked" coroutines are shut down
+        # without triggering warnings like "task was destroyed but it
+        # is pending". If this test were to fail, it would fail
+        # because runtests.py detected unexpected output to stderr.
+        event = Event()
+
+        async def callback():
+            try:
+                await event.wait()
+            except asyncio.CancelledError:
+                pass
+
+        self.io_loop.add_callback(callback)
+        self.io_loop.add_callback(self.stop)
+        self.wait()
 
 
 class AsyncHTTPTestCaseTest(AsyncHTTPTestCase):
@@ -70,14 +96,14 @@ class AsyncHTTPTestCaseTest(AsyncHTTPTestCase):
         return Application()
 
     def test_fetch_segment(self):
-        path = '/path'
+        path = "/path"
         response = self.fetch(path)
         self.assertEqual(response.request.url, self.get_url(path))
 
     def test_fetch_full_http_url(self):
         # Ensure that self.fetch() recognizes absolute urls and does
         # not transform them into references to our main test server.
-        path = 'http://localhost:%d/path' % self.second_port
+        path = "http://localhost:%d/path" % self.second_port
 
         response = self.fetch(path)
         self.assertEqual(response.request.url, path)
@@ -92,25 +118,28 @@ class AsyncTestCaseWrapperTest(unittest.TestCase):
         class Test(AsyncTestCase):
             def test_gen(self):
                 yield
-        test = Test('test_gen')
+
+        test = Test("test_gen")
         result = unittest.TestResult()
         test.run(result)
         self.assertEqual(len(result.errors), 1)
         self.assertIn("should be decorated", result.errors[0][1])
 
-    @unittest.skipIf(platform.python_implementation() == 'PyPy',
-                     'pypy destructor warnings cannot be silenced')
+    @unittest.skipIf(
+        platform.python_implementation() == "PyPy",
+        "pypy destructor warnings cannot be silenced",
+    )
     def test_undecorated_coroutine(self):
         class Test(AsyncTestCase):
             async def test_coro(self):
                 pass
 
-        test = Test('test_coro')
+        test = Test("test_coro")
         result = unittest.TestResult()
 
         # Silence "RuntimeWarning: coroutine 'test_coro' was never awaited".
         with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
+            warnings.simplefilter("ignore")
             test.run(result)
 
         self.assertEqual(len(result.errors), 1)
@@ -121,7 +150,8 @@ class AsyncTestCaseWrapperTest(unittest.TestCase):
             @unittest.skip("don't run this")
             def test_gen(self):
                 yield
-        test = Test('test_gen')
+
+        test = Test("test_gen")
         result = unittest.TestResult()
         test.run(result)
         self.assertEqual(len(result.errors), 0)
@@ -131,7 +161,8 @@ class AsyncTestCaseWrapperTest(unittest.TestCase):
         class Test(AsyncTestCase):
             def test_other_return(self):
                 return 42
-        test = Test('test_other_return')
+
+        test = Test("test_other_return")
         result = unittest.TestResult()
         test.run(result)
         self.assertEqual(len(result.errors), 1)
@@ -153,18 +184,36 @@ class SetUpTearDownTest(unittest.TestCase):
 
         class SetUpTearDown(unittest.TestCase):
             def setUp(self):
-                events.append('setUp')
+                events.append("setUp")
 
             def tearDown(self):
-                events.append('tearDown')
+                events.append("tearDown")
 
         class InheritBoth(AsyncTestCase, SetUpTearDown):
             def test(self):
-                events.append('test')
+                events.append("test")
 
-        InheritBoth('test').run(result)
-        expected = ['setUp', 'test', 'tearDown']
+        InheritBoth("test").run(result)
+        expected = ["setUp", "test", "tearDown"]
         self.assertEqual(expected, events)
+
+
+class AsyncHTTPTestCaseSetUpTearDownTest(unittest.TestCase):
+    def test_tear_down_releases_app_and_http_server(self):
+        result = unittest.TestResult()
+
+        class SetUpTearDown(AsyncHTTPTestCase):
+            def get_app(self):
+                return Application()
+
+            def test(self):
+                self.assertTrue(hasattr(self, "_app"))
+                self.assertTrue(hasattr(self, "http_server"))
+
+        test = SetUpTearDown("test")
+        test.run(result)
+        self.assertFalse(hasattr(test, "_app"))
+        self.assertFalse(hasattr(test, "http_server"))
 
 
 class GenTest(AsyncTestCase):
@@ -199,9 +248,7 @@ class GenTest(AsyncTestCase):
         except ioloop.TimeoutError:
             # The stack trace should blame the add_timeout line, not just
             # unrelated IOLoop/testing internals.
-            self.assertIn(
-                "gen.sleep(1)",
-                traceback.format_exc())
+            self.assertIn("gen.sleep(1)", traceback.format_exc())
 
         self.finished = True
 
@@ -220,7 +267,7 @@ class GenTest(AsyncTestCase):
             yield gen.sleep(0.25)
 
         # Uses provided timeout of 0.5 seconds, doesn't time out.
-        with set_environ('ASYNC_TEST_TIMEOUT', '0.1'):
+        with set_environ("ASYNC_TEST_TIMEOUT", "0.1"):
             test_long_timeout(self)
 
         self.finished = True
@@ -231,7 +278,7 @@ class GenTest(AsyncTestCase):
             yield gen.sleep(1)
 
         # Uses environment-variable timeout of 0.1, times out.
-        with set_environ('ASYNC_TEST_TIMEOUT', '0.1'):
+        with set_environ("ASYNC_TEST_TIMEOUT", "0.1"):
             with self.assertRaises(ioloop.TimeoutError):
                 test_short_timeout(self)
 
@@ -240,25 +287,26 @@ class GenTest(AsyncTestCase):
     def test_with_method_args(self):
         @gen_test
         def test_with_args(self, *args):
-            self.assertEqual(args, ('test',))
+            self.assertEqual(args, ("test",))
             yield gen.moment
 
-        test_with_args(self, 'test')
+        test_with_args(self, "test")
         self.finished = True
 
     def test_with_method_kwargs(self):
         @gen_test
         def test_with_kwargs(self, **kwargs):
-            self.assertDictEqual(kwargs, {'test': 'test'})
+            self.assertDictEqual(kwargs, {"test": "test"})
             yield gen.moment
 
-        test_with_kwargs(self, test='test')
+        test_with_kwargs(self, test="test")
         self.finished = True
 
     def test_native_coroutine(self):
         @gen_test
         async def test(self):
             self.finished = True
+
         test(self)
 
     def test_native_coroutine_timeout(self):
@@ -298,5 +346,5 @@ class GetNewIOLoopTest(AsyncTestCase):
         self.assertIs(self.io_loop.asyncio_loop, self.new_loop)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -1,13 +1,26 @@
 from tornado.concurrent import Future
 from tornado import gen
 from tornado import netutil
-from tornado.iostream import IOStream, SSLIOStream, PipeIOStream, StreamClosedError, _StreamBuffer
+from tornado.iostream import (
+    IOStream,
+    SSLIOStream,
+    PipeIOStream,
+    StreamClosedError,
+    _StreamBuffer,
+)
 from tornado.httputil import HTTPHeaders
 from tornado.locks import Condition, Event
 from tornado.log import gen_log
 from tornado.netutil import ssl_wrap_socket
 from tornado.tcpserver import TCPServer
-from tornado.testing import AsyncHTTPTestCase, AsyncHTTPSTestCase, AsyncTestCase, bind_unused_port, ExpectLog, gen_test  # noqa: E501
+from tornado.testing import (
+    AsyncHTTPTestCase,
+    AsyncHTTPSTestCase,
+    AsyncTestCase,
+    bind_unused_port,
+    ExpectLog,
+    gen_test,
+)
 from tornado.test.util import skipIfNonUnix, refusing_port, skipPypy3V58
 from tornado.web import RequestHandler, Application
 import errno
@@ -17,15 +30,14 @@ import platform
 import random
 import socket
 import ssl
-import sys
 from unittest import mock
 import unittest
 
 
 def _server_ssl_options():
     return dict(
-        certfile=os.path.join(os.path.dirname(__file__), 'test.crt'),
-        keyfile=os.path.join(os.path.dirname(__file__), 'test.key'),
+        certfile=os.path.join(os.path.dirname(__file__), "test.crt"),
+        keyfile=os.path.join(os.path.dirname(__file__), "test.key"),
     )
 
 
@@ -39,7 +51,7 @@ class TestIOStreamWebMixin(object):
         raise NotImplementedError()
 
     def get_app(self):
-        return Application([('/', HelloHandler)])
+        return Application([("/", HelloHandler)])
 
     def test_connection_closed(self):
         # When a server sends a response and then closes the connection,
@@ -54,7 +66,7 @@ class TestIOStreamWebMixin(object):
     @gen_test
     def test_read_until_close(self):
         stream = self._make_client_iostream()
-        yield stream.connect(('127.0.0.1', self.get_http_port()))
+        yield stream.connect(("127.0.0.1", self.get_http_port()))
         stream.write(b"GET / HTTP/1.0\r\n\r\n")
 
         data = yield stream.read_until_close()
@@ -107,18 +119,17 @@ class TestIOStreamWebMixin(object):
     def test_future_interface(self):
         """Basic test of IOStream's ability to return Futures."""
         stream = self._make_client_iostream()
-        connect_result = yield stream.connect(
-            ("127.0.0.1", self.get_http_port()))
+        connect_result = yield stream.connect(("127.0.0.1", self.get_http_port()))
         self.assertIs(connect_result, stream)
         yield stream.write(b"GET / HTTP/1.0\r\n\r\n")
         first_line = yield stream.read_until(b"\r\n")
         self.assertEqual(first_line, b"HTTP/1.1 200 OK\r\n")
         # callback=None is equivalent to no callback.
         header_data = yield stream.read_until(b"\r\n\r\n")
-        headers = HTTPHeaders.parse(header_data.decode('latin1'))
-        content_length = int(headers['Content-Length'])
+        headers = HTTPHeaders.parse(header_data.decode("latin1"))
+        content_length = int(headers["Content-Length"])
         body = yield stream.read_bytes(content_length)
-        self.assertEqual(body, b'Hello')
+        self.assertEqual(body, b"Hello")
         stream.close()
 
     @gen_test
@@ -158,7 +169,7 @@ class TestReadWriteMixin(object):
         # Attempting to write zero bytes should run the callback without
         # going into an infinite loop.
         rs, ws = yield self.make_iostream_pair()
-        yield ws.write(b'')
+        yield ws.write(b"")
         ws.close()
         rs.close()
 
@@ -233,10 +244,11 @@ class TestReadWriteMixin(object):
             # This test fails on pypy with ssl.  I think it's because
             # pypy's gc defeats moves objects, breaking the
             # "frozen write buffer" assumption.
-            if (isinstance(rs, SSLIOStream) and
-                    platform.python_implementation() == 'PyPy'):
-                raise unittest.SkipTest(
-                    "pypy gc causes problems with openssl")
+            if (
+                isinstance(rs, SSLIOStream)
+                and platform.python_implementation() == "PyPy"
+            ):
+                raise unittest.SkipTest("pypy gc causes problems with openssl")
             NUM_KB = 4096
             for i in range(NUM_KB):
                 ws.write(b"A" * 1024)
@@ -282,11 +294,12 @@ class TestReadWriteMixin(object):
         def close_callback():
             closed[0] = True
             cond.notify()
+
         rs.set_close_callback(close_callback)
         try:
-            ws.write(b'a')
+            ws.write(b"a")
             res = yield rs.read_bytes(1)
-            self.assertEqual(res, b'a')
+            self.assertEqual(res, b"a")
             self.assertFalse(closed[0])
             ws.close()
             yield cond.wait()
@@ -327,7 +340,7 @@ class TestReadWriteMixin(object):
             # Partial reads won't return an empty string, but read_bytes(0)
             # will.
             data = yield rs.read_bytes(0, partial=True)
-            self.assertEqual(data, b'')
+            self.assertEqual(data, b"")
         finally:
             ws.close()
             rs.close()
@@ -513,6 +526,7 @@ class TestReadWriteMixin(object):
 
         def sleep_some():
             self.io_loop.run_sync(lambda: gen.sleep(0.05))
+
         try:
             buf = bytearray(10)
             fut = rs.read_into(buf)
@@ -652,11 +666,13 @@ class TestIOStreamMixin(TestReadWriteMixin):
         server_stream_fut = Future()  # type: Future[IOStream]
 
         def accept_callback(connection, address):
-            server_stream_fut.set_result(self._make_server_iostream(connection, **kwargs))
+            server_stream_fut.set_result(
+                self._make_server_iostream(connection, **kwargs)
+            )
 
         netutil.add_accept_handler(listener, accept_callback)
         client_stream = self._make_client_iostream(socket.socket(), **kwargs)
-        connect_fut = client_stream.connect(('127.0.0.1', port))
+        connect_fut = client_stream.connect(("127.0.0.1", port))
         server_stream, client_stream = yield [server_stream_fut, connect_fut]
         self.io_loop.remove_handler(listener.fileno())
         listener.close()
@@ -677,13 +693,7 @@ class TestIOStreamMixin(TestReadWriteMixin):
             with self.assertRaises(StreamClosedError):
                 yield stream.connect(("127.0.0.1", port))
 
-        self.assertTrue(isinstance(stream.error, socket.error), stream.error)
-        if sys.platform != 'cygwin':
-            _ERRNO_CONNREFUSED = [errno.ECONNREFUSED]
-            if hasattr(errno, "WSAECONNREFUSED"):
-                _ERRNO_CONNREFUSED.append(errno.WSAECONNREFUSED)  # type: ignore
-            # cygwin's errnos don't match those used on native windows python
-            self.assertTrue(stream.error.args[0] in _ERRNO_CONNREFUSED)  # type: ignore
+        self.assertTrue(isinstance(stream.error, ConnectionRefusedError), stream.error)
 
     @gen_test
     def test_gaierror(self):
@@ -695,19 +705,22 @@ class TestIOStreamMixin(TestReadWriteMixin):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
         stream = IOStream(s)
         stream.set_close_callback(self.stop)
-        with mock.patch('socket.socket.connect',
-                        side_effect=socket.gaierror(errno.EIO, 'boom')):
+        with mock.patch(
+            "socket.socket.connect", side_effect=socket.gaierror(errno.EIO, "boom")
+        ):
             with self.assertRaises(StreamClosedError):
-                yield stream.connect(('localhost', 80))
+                yield stream.connect(("localhost", 80))
             self.assertTrue(isinstance(stream.error, socket.gaierror))
 
     @gen_test
     def test_read_until_close_with_error(self):
         server, client = yield self.make_iostream_pair()
         try:
-            with mock.patch('tornado.iostream.BaseIOStream._try_inline_read',
-                            side_effect=IOError('boom')):
-                with self.assertRaisesRegexp(IOError, 'boom'):
+            with mock.patch(
+                "tornado.iostream.BaseIOStream._try_inline_read",
+                side_effect=IOError("boom"),
+            ):
+                with self.assertRaisesRegexp(IOError, "boom"):
                     client.read_until_close()
         finally:
             server.close()
@@ -745,12 +758,13 @@ class TestIOStreamMixin(TestReadWriteMixin):
         try:
             # Start a read that will be fulfilled asynchronously.
             server.read_bytes(1)
-            client.write(b'a')
+            client.write(b"a")
             # Stub out read_from_fd to make it fail.
 
             def fake_read_from_fd():
                 os.close(server.socket.fileno())
                 server.__class__.read_from_fd(server)
+
             server.read_from_fd = fake_read_from_fd
             # This log message is from _handle_read (not read_from_fd).
             with ExpectLog(gen_log, "error on read"):
@@ -773,7 +787,7 @@ class TestIOStreamMixin(TestReadWriteMixin):
 
         @gen.coroutine
         def produce():
-            data = b'x' * m
+            data = b"x" * m
             for i in range(n):
                 yield server.write(data)
 
@@ -798,8 +812,7 @@ class TestIOStreamWebHTTP(TestIOStreamWebMixin, AsyncHTTPTestCase):
 
 class TestIOStreamWebHTTPS(TestIOStreamWebMixin, AsyncHTTPSTestCase):
     def _make_client_iostream(self):
-        return SSLIOStream(socket.socket(),
-                           ssl_options=dict(cert_reqs=ssl.CERT_NONE))
+        return SSLIOStream(socket.socket(), ssl_options=dict(cert_reqs=ssl.CERT_NONE))
 
 
 class TestIOStream(TestIOStreamMixin, AsyncTestCase):
@@ -812,16 +825,18 @@ class TestIOStream(TestIOStreamMixin, AsyncTestCase):
 
 class TestIOStreamSSL(TestIOStreamMixin, AsyncTestCase):
     def _make_server_iostream(self, connection, **kwargs):
-        connection = ssl.wrap_socket(connection,
-                                     server_side=True,
-                                     do_handshake_on_connect=False,
-                                     **_server_ssl_options())
+        connection = ssl.wrap_socket(
+            connection,
+            server_side=True,
+            do_handshake_on_connect=False,
+            **_server_ssl_options()
+        )
         return SSLIOStream(connection, **kwargs)
 
     def _make_client_iostream(self, connection, **kwargs):
-        return SSLIOStream(connection,
-                           ssl_options=dict(cert_reqs=ssl.CERT_NONE),
-                           **kwargs)
+        return SSLIOStream(
+            connection, ssl_options=dict(cert_reqs=ssl.CERT_NONE), **kwargs
+        )
 
 
 # This will run some tests that are basically redundant but it's the
@@ -831,11 +846,12 @@ class TestIOStreamSSLContext(TestIOStreamMixin, AsyncTestCase):
     def _make_server_iostream(self, connection, **kwargs):
         context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
         context.load_cert_chain(
-            os.path.join(os.path.dirname(__file__), 'test.crt'),
-            os.path.join(os.path.dirname(__file__), 'test.key'))
-        connection = ssl_wrap_socket(connection, context,
-                                     server_side=True,
-                                     do_handshake_on_connect=False)
+            os.path.join(os.path.dirname(__file__), "test.crt"),
+            os.path.join(os.path.dirname(__file__), "test.key"),
+        )
+        connection = ssl_wrap_socket(
+            connection, context, server_side=True, do_handshake_on_connect=False
+        )
         return SSLIOStream(connection, **kwargs)
 
     def _make_client_iostream(self, connection, **kwargs):
@@ -852,8 +868,9 @@ class TestIOStreamStartTLS(AsyncTestCase):
             self.server_accepted = Future()  # type: Future[None]
             netutil.add_accept_handler(self.listener, self.accept)
             self.client_stream = IOStream(socket.socket())
-            self.io_loop.add_future(self.client_stream.connect(
-                ('127.0.0.1', self.port)), self.stop)
+            self.io_loop.add_future(
+                self.client_stream.connect(("127.0.0.1", self.port)), self.stop
+            )
             self.wait()
             self.io_loop.add_future(self.server_accepted, self.stop)
             self.wait()
@@ -922,12 +939,12 @@ class TestIOStreamStartTLS(AsyncTestCase):
     def test_handshake_fail(self):
         server_future = self.server_start_tls(_server_ssl_options())
         # Certificates are verified with the default configuration.
-        client_future = self.client_start_tls(server_hostname="localhost")
         with ExpectLog(gen_log, "SSL Error"):
+            client_future = self.client_start_tls(server_hostname="localhost")
             with self.assertRaises(ssl.SSLError):
                 yield client_future
-        with self.assertRaises((ssl.SSLError, socket.error)):
-            yield server_future
+            with self.assertRaises((ssl.SSLError, socket.error)):
+                yield server_future
 
     @gen_test
     def test_check_hostname(self):
@@ -935,16 +952,16 @@ class TestIOStreamStartTLS(AsyncTestCase):
         # The check_hostname functionality is only available in python 2.7 and
         # up and in python 3.4 and up.
         server_future = self.server_start_tls(_server_ssl_options())
-        client_future = self.client_start_tls(
-            ssl.create_default_context(),
-            server_hostname='127.0.0.1')
         with ExpectLog(gen_log, "SSL Error"):
+            client_future = self.client_start_tls(
+                ssl.create_default_context(), server_hostname="127.0.0.1"
+            )
             with self.assertRaises(ssl.SSLError):
                 # The client fails to connect with an SSL error.
                 yield client_future
-        with self.assertRaises(Exception):
-            # The server fails to connect, but the exact error is unspecified.
-            yield server_future
+            with self.assertRaises(Exception):
+                # The server fails to connect, but the exact error is unspecified.
+                yield server_future
 
 
 class WaitForHandshakeTest(AsyncTestCase):
@@ -956,9 +973,10 @@ class WaitForHandshakeTest(AsyncTestCase):
             server = server_cls(ssl_options=_server_ssl_options())
             server.add_socket(sock)
 
-            client = SSLIOStream(socket.socket(),
-                                 ssl_options=dict(cert_reqs=ssl.CERT_NONE))
-            yield client.connect(('127.0.0.1', port))
+            client = SSLIOStream(
+                socket.socket(), ssl_options=dict(cert_reqs=ssl.CERT_NONE)
+            )
+            yield client.connect(("127.0.0.1", port))
             self.assertIsNotNone(client.socket.cipher())
         finally:
             if server is not None:
@@ -1031,7 +1049,7 @@ class TestPipeIOStream(TestReadWriteMixin, AsyncTestCase):
         ws.write(b"hel")
         ws.write(b"lo world")
 
-        data = yield rs.read_until(b' ')
+        data = yield rs.read_until(b" ")
         self.assertEqual(data, b"hello ")
 
         data = yield rs.read_bytes(3)
@@ -1072,7 +1090,7 @@ class TestStreamBuffer(unittest.TestCase):
         if isinstance(b, (bytes, bytearray)):
             return bytes(b)
         elif isinstance(b, memoryview):
-            return b.tobytes()   # For py2
+            return b.tobytes()  # For py2
         else:
             raise TypeError(b)
 
@@ -1086,7 +1104,7 @@ class TestStreamBuffer(unittest.TestCase):
         size = 1
         while size < 2 * len(expected):
             got = self.to_bytes(buf.peek(size))
-            self.assertTrue(got)   # Not empty
+            self.assertTrue(got)  # Not empty
             self.assertLessEqual(len(got), size)
             self.assertTrue(expected.startswith(got), (expected, got))
             size = (size * 3 + 1) // 2
@@ -1094,7 +1112,7 @@ class TestStreamBuffer(unittest.TestCase):
     def check_append_all_then_skip_all(self, buf, objs, input_type):
         self.assertEqual(len(buf), 0)
 
-        expected = b''
+        expected = b""
 
         for o in objs:
             expected += o
@@ -1112,7 +1130,7 @@ class TestStreamBuffer(unittest.TestCase):
         self.assertEqual(len(buf), 0)
 
     def test_small(self):
-        objs = [b'12', b'345', b'67', b'89a', b'bcde', b'fgh', b'ijklmn']
+        objs = [b"12", b"345", b"67", b"89a", b"bcde", b"fgh", b"ijklmn"]
 
         buf = self.make_streambuffer()
         self.check_append_all_then_skip_all(buf, objs, bytes)
@@ -1126,10 +1144,10 @@ class TestStreamBuffer(unittest.TestCase):
         # Test internal algorithm
         buf = self.make_streambuffer(10)
         for i in range(9):
-            buf.append(b'x')
+            buf.append(b"x")
         self.assertEqual(len(buf._buffers), 1)
         for i in range(9):
-            buf.append(b'x')
+            buf.append(b"x")
         self.assertEqual(len(buf._buffers), 2)
         buf.advance(10)
         self.assertEqual(len(buf._buffers), 1)
@@ -1138,13 +1156,15 @@ class TestStreamBuffer(unittest.TestCase):
         self.assertEqual(len(buf), 0)
 
     def test_large(self):
-        objs = [b'12' * 5,
-                b'345' * 2,
-                b'67' * 20,
-                b'89a' * 12,
-                b'bcde' * 1,
-                b'fgh' * 7,
-                b'ijklmn' * 2]
+        objs = [
+            b"12" * 5,
+            b"345" * 2,
+            b"67" * 20,
+            b"89a" * 12,
+            b"bcde" * 1,
+            b"fgh" * 7,
+            b"ijklmn" * 2,
+        ]
 
         buf = self.make_streambuffer()
         self.check_append_all_then_skip_all(buf, objs, bytes)
@@ -1158,11 +1178,11 @@ class TestStreamBuffer(unittest.TestCase):
         # Test internal algorithm
         buf = self.make_streambuffer(10)
         for i in range(3):
-            buf.append(b'x' * 11)
+            buf.append(b"x" * 11)
         self.assertEqual(len(buf._buffers), 3)
-        buf.append(b'y')
+        buf.append(b"y")
         self.assertEqual(len(buf._buffers), 4)
-        buf.append(b'z')
+        buf.append(b"z")
         self.assertEqual(len(buf._buffers), 4)
         buf.advance(33)
         self.assertEqual(len(buf._buffers), 1)

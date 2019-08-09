@@ -1,6 +1,3 @@
-# Author: Ovidiu Predescu
-# Date: July 2011
-#
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
 # a copy of the License at
@@ -12,13 +9,7 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-"""Bridges between the Twisted reactor and Tornado IOLoop.
-
-This module lets you run applications and libraries written for
-Twisted in a Tornado application.  It can be used in two modes,
-depending on which library's underlying event loop you want to use.
-
-This module has been tested with Twisted versions 11.0.0 and newer.
+"""Bridges between the Twisted package and Tornado.
 """
 
 import socket
@@ -40,6 +31,7 @@ from tornado import gen
 from tornado.netutil import Resolver
 
 import typing
+
 if typing.TYPE_CHECKING:
     from typing import Generator, Any, List, Tuple  # noqa: F401
 
@@ -61,22 +53,25 @@ class TwistedResolver(Resolver):
     .. versionchanged:: 5.0
        The ``io_loop`` argument (deprecated since version 4.1) has been removed.
     """
+
     def initialize(self) -> None:
         # partial copy of twisted.names.client.createResolver, which doesn't
         # allow for a reactor to be passed in.
         self.reactor = twisted.internet.asyncioreactor.AsyncioSelectorReactor()
 
-        host_resolver = twisted.names.hosts.Resolver('/etc/hosts')
+        host_resolver = twisted.names.hosts.Resolver("/etc/hosts")
         cache_resolver = twisted.names.cache.CacheResolver(reactor=self.reactor)
-        real_resolver = twisted.names.client.Resolver('/etc/resolv.conf',
-                                                      reactor=self.reactor)
+        real_resolver = twisted.names.client.Resolver(
+            "/etc/resolv.conf", reactor=self.reactor
+        )
         self.resolver = twisted.names.resolve.ResolverChain(
-            [host_resolver, cache_resolver, real_resolver])
+            [host_resolver, cache_resolver, real_resolver]
+        )
 
     @gen.coroutine
     def resolve(
-            self, host: str, port: int, family: int=0,
-    ) -> 'Generator[Any, Any, List[Tuple[int, Any]]]':
+        self, host: str, port: int, family: int = 0
+    ) -> "Generator[Any, Any, List[Tuple[int, Any]]]":
         # getHostByName doesn't accept IP addresses, so if the input
         # looks like an IP address just return it immediately.
         if twisted.internet.abstract.isIPAddress(host):
@@ -102,15 +97,39 @@ class TwistedResolver(Resolver):
             else:
                 resolved_family = socket.AF_UNSPEC
         if family != socket.AF_UNSPEC and family != resolved_family:
-            raise Exception('Requested socket family %d but got %d' %
-                            (family, resolved_family))
-        result = [
-            (typing.cast(int, resolved_family), (resolved, port)),
-        ]
+            raise Exception(
+                "Requested socket family %d but got %d" % (family, resolved_family)
+            )
+        result = [(typing.cast(int, resolved_family), (resolved, port))]
         return result
 
 
-if hasattr(gen.convert_yielded, 'register'):
+def install() -> None:
+    """Install ``AsyncioSelectorReactor`` as the default Twisted reactor.
+
+    .. deprecated:: 5.1
+
+       This function is provided for backwards compatibility; code
+       that does not require compatibility with older versions of
+       Tornado should use
+       ``twisted.internet.asyncioreactor.install()`` directly.
+
+    .. versionchanged:: 6.0.3
+
+       In Tornado 5.x and before, this function installed a reactor
+       based on the Tornado ``IOLoop``. When that reactor
+       implementation was removed in Tornado 6.0.0, this function was
+       removed as well. It was restored in Tornado 6.0.3 using the
+       ``asyncio`` reactor instead.
+
+    """
+    from twisted.internet.asyncioreactor import install
+
+    install()
+
+
+if hasattr(gen.convert_yielded, "register"):
+
     @gen.convert_yielded.register(Deferred)  # type: ignore
     def _(d: Deferred) -> Future:
         f = Future()  # type: Future[Any]
@@ -122,5 +141,6 @@ if hasattr(gen.convert_yielded, 'register'):
                 raise Exception("errback called without error")
             except:
                 future_set_exc_info(f, sys.exc_info())
+
         d.addCallbacks(f.set_result, errback)
         return f
